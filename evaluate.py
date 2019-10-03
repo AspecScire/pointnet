@@ -6,6 +6,7 @@ import importlib
 import time
 import os
 import scipy.misc
+import imageio
 import sys
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -61,7 +62,7 @@ def evaluate(num_votes):
         is_training_pl = tf.placeholder(tf.bool, shape=())
 
         # simple model
-        pred, end_points = MODEL.get_model(pointclouds_pl, is_training_pl)
+        pred, end_points = MODEL.get_model(pointclouds_pl, is_training_pl, False)
         loss = MODEL.get_loss(pred, labels_pl, end_points)
         
         # Add ops to save and restore all the variables.
@@ -151,7 +152,8 @@ def eval_one_epoch(sess, ops, num_votes=1, topk=1):
                                                            SHAPE_NAMES[pred_val[i-start_idx]])
                     img_filename = os.path.join(DUMP_DIR, img_filename)
                     output_img = pc_util.point_cloud_three_views(np.squeeze(current_data[i, :, :]))
-                    scipy.misc.imsave(img_filename, output_img)
+                    imageio.imwrite(img_filename,output_img)
+                    #scipy.misc.imsave(img_filename, output_img)
                     error_cnt += 1
                 
     log_string('eval mean loss: %f' % (loss_sum / float(total_seen)))

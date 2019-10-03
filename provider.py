@@ -96,13 +96,18 @@ def load_h5(h5_filename):
 def loadDataFile(filename):
     return load_h5(filename)
 
+def loadBlockData(h5_filename):
+    f = h5py.File(h5_filename)
+    data = f['data'][:]
+    files = f['source_file'][:]
+    return (data, files)
+
 def load_h5_data_label_seg(h5_filename):
     f = h5py.File(h5_filename)
     data = f['data'][:]
     label = f['label'][:]
     seg = f['pid'][:]
     return (data, label, seg)
-
 
 def loadDataFile_with_seg(filename):
     return load_h5_data_label_seg(filename)
