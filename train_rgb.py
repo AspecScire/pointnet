@@ -38,9 +38,6 @@ MOMENTUM = FLAGS.momentum
 OPTIMIZER = FLAGS.optimizer
 DECAY_STEP = FLAGS.decay_step
 DECAY_RATE = FLAGS.decay_rate
-INIT_MODEL_PATH = 'log/model.ckpt'
-FEATURE = False
-INPUT_DIM = 3
 
 MODEL = importlib.import_module(FLAGS.model) # import network module
 MODEL_FILE = os.path.join(BASE_DIR, 'models', FLAGS.model+'.py')
@@ -48,18 +45,38 @@ LOG_DIR = FLAGS.log_dir
 if not os.path.exists(LOG_DIR): os.mkdir(LOG_DIR)
 os.system('cp %s %s' % (MODEL_FILE, LOG_DIR)) # bkp of model def
 os.system('cp train.py %s' % (LOG_DIR)) # bkp of train procedure
-LOG_FOUT = open(os.path.join(LOG_DIR, 'log_train.txt'), 'w')
+LOG_FOUT = open(os.path.join(LOG_DIR, 'log_train_rgb.txt'), 'w')
 LOG_FOUT.write(str(FLAGS)+'\n')
 
 MAX_NUM_POINT = 2048
-NUM_CLASSES = 2
+#NUM_CLASSES = 40
+NUM_CLASSES = 3
+FEATURE = False
+INPUT_DIM = 6
 
 BN_INIT_DECAY = 0.5
 BN_DECAY_DECAY_RATE = 0.5
 BN_DECAY_DECAY_STEP = float(DECAY_STEP)
 BN_DECAY_CLIP = 0.99
 
-initial_vars =          ['fc3/weights/Adam','fc3/weights/Adam_1','fc3/biases/Adam','fc3/biases/Adam_1','fc3/weights','fc3/biases']
+initial_vars = ['conv1/weights/Adam','conv1/weights/Adam_1','conv1/biases/Adam','conv1/biases/Adam_1',
+                'conv1/bn/beta/Adam','conv1/bn/beta/Adam_1', 'conv1/bn/gamma/Adam','conv1/bn/gamma/Adam_1',
+                'conv1/weights','conv1/biases','conv1/bn/beta','conv1/bn/gamma',
+                'conv1/bn/conv1/bn/moments/Squeeze/ExponentialMovingAverage',
+                'conv1/bn/conv1/bn/moments/Squeeze_1/ExponentialMovingAverage',
+                'transform_net1/tconv1/weights/Adam','transform_net1/tconv1/weights/Adam_1',
+                'transform_net1/tconv1/biases/Adam', 'transform_net1/tconv1/biases/Adam_1',
+                'transform_net1/tconv1/bn/beta/Adam', 'transform_net1/tconv1/bn/beta/Adam_1',
+                'transform_net1/tconv1/bn/gamma/Adam', 'transform_net1/tconv1/bn/gamma/Adam_1',
+                'transform_net1/tconv1/weights','transform_net1/tconv1/biases','transform_net1/tconv1/bn/beta',
+                'transform_net1/tconv1/bn/gamma',
+                'transform_net1/tconv1/bn/transform_net1/tconv1/bn/moments/Squeeze/ExponentialMovingAverage',
+                'transform_net1/tconv1/bn/transform_net1/tconv1/bn/moments/Squeeze_1/ExponentialMovingAverage',
+                'transform_net1/transform_XYZ/weights/Adam','transform_net1/transform_XYZ/weights/Adam_1',
+                'transform_net1/transform_XYZ/biases/Adam','transform_net1/transform_XYZ/biases/Adam_1',
+                'transform_net1/transform_XYZ/weights','transform_net1/transform_XYZ/biases',
+                'fc3/weights/Adam','fc3/weights/Adam_1','fc3/biases/Adam','fc3/biases/Adam_1','fc3/weights','fc3/biases'
+               ]
 
 HOSTNAME = socket.gethostname()
 
@@ -70,8 +87,8 @@ TRAIN_FILES = provider.getDataFiles( \
 TEST_FILES = provider.getDataFiles(\
     os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/test_files.txt'))
 '''
-TRAIN_FILES = ['./training_files/train_rot_20_2class.h5']
-TEST_FILES = ['./training_files/eval_rot_20_2class.h5']
+TRAIN_FILES = ['train_rgb.h5']
+TEST_FILES = ['eval_rgb.h5']
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -99,11 +116,11 @@ def get_bn_decay(batch):
     bn_decay = tf.minimum(BN_DECAY_CLIP, 1 - bn_momentum)
     return bn_decay
 
-def get_variables_to_restore(variables, var_keep_dic):
+def get_variables_to_restore(variables, var_ckpt):
     variables_to_restore = []
     for v in variables:
         # one can do include or exclude operations here.
-        if v.name.split(':')[0] in var_keep_dic:
+        if v.name.split(':')[0] in var_ckpt:
             if v.name.split(':')[0] in initial_vars:
                 continue
             print("Variables restored: %s" % v.name)
@@ -125,14 +142,15 @@ def train():
             tf.summary.scalar('bn_decay', bn_decay)
 
             # Get model and loss 
-            pred, end_points = MODEL.get_model(pointclouds_pl, is_training_pl, FEATURE , INPUT_DIM, bn_decay=bn_decay)
+            pred, end_points = MODEL.get_model(pointclouds_pl, is_training_pl, FEATURE, INPUT_DIM, bn_decay=bn_decay)
+            
             loss = MODEL.get_loss(pred, labels_pl, end_points)
-            tf.summary.scalar('loss', loss)
-
+            tf.summary.scalar('loss', loss)            
+            
             correct = tf.equal(tf.argmax(pred, 1), tf.to_int64(labels_pl))
             accuracy = tf.reduce_sum(tf.cast(correct, tf.float32)) / float(BATCH_SIZE)
             tf.summary.scalar('accuracy', accuracy)
-
+           
             # Get training operator
             learning_rate = get_learning_rate(batch)
             tf.summary.scalar('learning_rate', learning_rate)
@@ -140,15 +158,11 @@ def train():
                 optimizer = tf.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
             elif OPTIMIZER == 'adam':
                 optimizer = tf.train.AdamOptimizer(learning_rate)
-            
-            tvar1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='fc2')
-            tvar2 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='dp2')
-            tvar3 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='fc3')
-            train_op = optimizer.minimize(loss, global_step=batch, var_list=[tvar2,tvar3])
-            #train_op = optimizer.minimize(loss, global_step=batch)
+            train_op = optimizer.minimize(loss, global_step=batch)
             
             # Add ops to save and restore all the variables.
             saver = tf.train.Saver()
+            
             
         # Create a session
         config = tf.ConfigProto()
@@ -165,9 +179,10 @@ def train():
         test_writer = tf.summary.FileWriter(os.path.join(LOG_DIR, 'test'))
         
         ckpt = tf.train.get_checkpoint_state(os.path.join(BASE_DIR, 'log'))
-        
         pretrained_model = ckpt.model_checkpoint_path
-        
+
+        # Building up the new graph, and create a session: sess
+
         # Initilize all variables
         init = tf.global_variables_initializer()
         sess.run(init, {is_training_pl: True})
@@ -180,6 +195,7 @@ def train():
         restorer.restore(sess, pretrained_model)
         print("loaded.")
         
+               
         '''
         # Init variables
         init = tf.global_variables_initializer()
@@ -188,7 +204,7 @@ def train():
         #sess.run(init)
         sess.run(init, {is_training_pl: True})
         '''
-
+      
         ops = {'pointclouds_pl': pointclouds_pl,
                'labels_pl': labels_pl,
                'is_training_pl': is_training_pl,
@@ -197,7 +213,7 @@ def train():
                'train_op': train_op,
                'merged': merged,
                'step': batch}
-
+        
         for epoch in range(MAX_EPOCH):
             log_string('**** EPOCH %03d ****' % (epoch))
             sys.stdout.flush()
@@ -209,7 +225,7 @@ def train():
             if epoch % 10 == 0:
                 save_path = saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"))
                 log_string("Model saved in file: %s" % save_path)
-
+               
 
 def train_one_epoch(sess, ops, train_writer):
     """ ops: dict mapping from string to tf ops """
@@ -227,12 +243,12 @@ def train_one_epoch(sess, ops, train_writer):
         current_label = np.squeeze(current_label)
         
         file_size = current_data.shape[0]
+        print(file_size)
         num_batches = file_size // BATCH_SIZE
         
         total_correct = 0
         total_seen = 0
         loss_sum = 0
-        print(file_size)
        
         for batch_idx in range(num_batches):
             start_idx = batch_idx * BATCH_SIZE
@@ -240,8 +256,9 @@ def train_one_epoch(sess, ops, train_writer):
             
             # Augment batched point clouds by rotation and jittering
             #rotated_data = provider.rotate_point_cloud(current_data[start_idx:end_idx, :, :])
-            jittered_data = provider.jitter_point_cloud(current_data[start_idx:end_idx, :, :])
-            feed_dict = {ops['pointclouds_pl']: jittered_data,
+            #jittered_data = provider.jitter_point_cloud(rotated_data)
+            feed_dict = {#ops['pointclouds_pl']:jittered_data
+                         ops['pointclouds_pl']: current_data[start_idx:end_idx, :, :],
                          ops['labels_pl']: current_label[start_idx:end_idx],
                          ops['is_training_pl']: is_training,}
             summary, step, _, loss_val, pred_val = sess.run([ops['merged'], ops['step'],
@@ -274,7 +291,7 @@ def eval_one_epoch(sess, ops, test_writer):
         
         file_size = current_data.shape[0]
         num_batches = file_size // BATCH_SIZE
-        print(file_size)
+        #num_batches = 1
         
         for batch_idx in range(num_batches):
             start_idx = batch_idx * BATCH_SIZE
@@ -294,8 +311,9 @@ def eval_one_epoch(sess, ops, test_writer):
                 l = current_label[i]
                 total_seen_class[l] += 1
                 total_correct_class[l] += (pred_val[i-start_idx] == l)
-    print(total_correct_class)
-    print(total_seen_class)        
+                
+                
+    print(total_correct_class,total_seen_class)        
     log_string('eval mean loss: %f' % (loss_sum / float(total_seen)))
     log_string('eval accuracy: %f'% (total_correct / float(total_seen)))
     log_string('eval avg class acc: %f' % (np.mean(np.array(total_correct_class)/np.array(total_seen_class,dtype=np.float))))

@@ -19,7 +19,7 @@ import pc_util
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', type=int, default=0, help='GPU to use [default: GPU 0]')
 parser.add_argument('--model', default='pointnet_cls', help='Model name: pointnet_cls or pointnet_cls_basic [default: pointnet_cls]')
-parser.add_argument('--batch_size', type=int, default=4, help='Batch Size during training [default: 1]')
+parser.add_argument('--batch_size', type=int, default=1, help='Batch Size during training [default: 1]')
 parser.add_argument('--num_point', type=int, default=1024, help='Point Number [256/512/1024/2048] [default: 1024]')
 parser.add_argument('--model_path', default='log/model.ckpt', help='model checkpoint file path [default: log/model.ckpt]')
 parser.add_argument('--dump_dir', default='dump', help='dump folder path [dump]')
@@ -36,18 +36,23 @@ DUMP_DIR = FLAGS.dump_dir
 if not os.path.exists(DUMP_DIR): os.mkdir(DUMP_DIR)
 LOG_FOUT = open(os.path.join(DUMP_DIR, 'log_evaluate.txt'), 'w')
 LOG_FOUT.write(str(FLAGS)+'\n')
+INPUT_DIM = 3
+FEATURE = False
 
-NUM_CLASSES = 40
+NUM_CLASSES = 2
 SHAPE_NAMES = [line.rstrip() for line in \
     open(os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/shape_names.txt'))] 
 
 HOSTNAME = socket.gethostname()
 
+'''
 # ModelNet40 official train/test split
 TRAIN_FILES = provider.getDataFiles( \
     os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/train_files.txt'))
 TEST_FILES = provider.getDataFiles(\
     os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/test_files.txt'))
+'''
+TEST_FILES = ['./training_files/test_rot_20_2class.h5']
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -58,11 +63,11 @@ def evaluate(num_votes):
     is_training = False
      
     with tf.device('/gpu:'+str(GPU_INDEX)):
-        pointclouds_pl, labels_pl = MODEL.placeholder_inputs(BATCH_SIZE, NUM_POINT)
+        pointclouds_pl, labels_pl = MODEL.placeholder_inputs(BATCH_SIZE, NUM_POINT, INPUT_DIM)
         is_training_pl = tf.placeholder(tf.bool, shape=())
 
         # simple model
-        pred, end_points = MODEL.get_model(pointclouds_pl, is_training_pl, False)
+        pred, end_points = MODEL.get_model(pointclouds_pl, is_training_pl, FEATURE, INPUT_DIM, False)
         loss = MODEL.get_loss(pred, labels_pl, end_points)
         
         # Add ops to save and restore all the variables.
@@ -85,7 +90,7 @@ def evaluate(num_votes):
            'pred': pred,
            'loss': loss}
 
-    eval_one_epoch(sess, ops, num_votes)
+    #eval_one_epoch(sess, ops, num_votes)
 
    
 def eval_one_epoch(sess, ops, num_votes=1, topk=1):
@@ -161,8 +166,8 @@ def eval_one_epoch(sess, ops, num_votes=1, topk=1):
     log_string('eval avg class acc: %f' % (np.mean(np.array(total_correct_class)/np.array(total_seen_class,dtype=np.float))))
     
     class_accuracies = np.array(total_correct_class)/np.array(total_seen_class,dtype=np.float)
-    for i, name in enumerate(SHAPE_NAMES):
-        log_string('%10s:\t%0.3f' % (name, class_accuracies[i]))
+    #for i, name in enumerate(SHAPE_NAMES):
+    #    log_string('%10s:\t%0.3f' % (name, class_accuracies[i]))
     
 
 

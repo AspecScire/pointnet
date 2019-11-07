@@ -7,15 +7,17 @@ sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, '../utils'))
 import tf_util
 
-def input_transform_net(point_cloud, is_training, bn_decay=None, K=3):
+def input_transform_net(point_cloud, is_training, input_dim, K, bn_decay=None):
     """ Input (XYZ) Transform Net, input is BxNx3 gray image
+        K :  output dimension(currently same as input)
         Return:
-            Transformation matrix of size 3xK """
+            Transformation matrix of size input_dimxK (either 6xK or 3xK)"""
+    
     batch_size = point_cloud.get_shape()[0].value
     num_point = point_cloud.get_shape()[1].value
 
     input_image = tf.expand_dims(point_cloud, -1)
-    net = tf_util.conv2d(input_image, 64, [1,3],
+    net = tf_util.conv2d(input_image, 64, [1,input_dim],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
                          scope='tconv1', bn_decay=bn_decay)
@@ -37,18 +39,28 @@ def input_transform_net(point_cloud, is_training, bn_decay=None, K=3):
                                   scope='tfc2', bn_decay=bn_decay)
 
     with tf.variable_scope('transform_XYZ') as sc:
-        assert(K==3)
-        weights = tf.get_variable('weights', [256, 3*K],
+        #assert(K==3)
+        weights = tf.get_variable('weights', [256, input_dim*K],
                                   initializer=tf.constant_initializer(0.0),
                                   dtype=tf.float32)
-        biases = tf.get_variable('biases', [3*K],
+        biases = tf.get_variable('biases', [input_dim*K],
                                  initializer=tf.constant_initializer(0.0),
                                  dtype=tf.float32)
-        biases += tf.constant([1,0,0,0,1,0,0,0,1], dtype=tf.float32)
+        if(input_dim == 6):
+            biases += tf.constant([1,0,0,0,0,0,
+                               0,1,0,0,0,0,
+                               0,0,1,0,0,0,
+                               0,0,0,1,0,0,
+                               0,0,0,0,1,0,
+                               0,0,0,0,0,1], dtype=tf.float32)
+        elif(input_dim == 3):
+            biases += tf.constant([1,0,0,
+                                   0,1,0,
+                                   0,0,1,], dtype=tf.float32)
         transform = tf.matmul(net, weights)
         transform = tf.nn.bias_add(transform, biases)
 
-    transform = tf.reshape(transform, [batch_size, 3, K])
+    transform = tf.reshape(transform, [batch_size, input_dim, K])
     return transform
 
 
